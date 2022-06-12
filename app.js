@@ -1,17 +1,123 @@
 const codeObj = {
     init: function(elevators, floors) {
-        var elevator = elevators[0]; // Let's use the first elevator
+        function minBy(array, iteratee) {
+            let result
+            if (array == null) {
+                return result
+            }
+            let computed
+            for (const value of array) {
+                const current = iteratee(value)
 
-        // Whenever the elevator is idle (has no more queued destinations) ...
-        elevator.on("idle", function() {
-            // let's go to all the floors (or did we forget one?)
-            elevator.goToFloor(0);
-            elevator.goToFloor(1);
+                if (current != null && (computed === undefined
+                                        ? (current === current)
+                                        : (current < computed)
+                                       )) {
+                    computed = current
+                    result = value
+                }
+            }
+            return result
+        }
+        
+        const waitingAtFloors = elevators.map(() => new Set());
+        //const waitingAtFloors = new Set();
+        elevators.forEach((elevator, elevatorIndex) => {
+			const floorSet = waitingAtFloors[elevatorIndex];
+
+            function onIdle() {
+                // let's go to all the floors (or did we forget one?)
+                const pressedFloors = elevator.getPressedFloors();
+
+                if (floorSet.size > 0) {
+                    // TODO: pick closest floor
+                    const newFloor = minBy(floorSet.values(), floorNum => Math.abs(floorNum - elevator.currentFloor()));
+                    elevator.goToFloor(newFloor);
+                    floorSet.delete(newFloor);
+                } else {
+                    //debugger;
+                }
+            }
+
+            // Whenever the elevator is idle (has no more queued destinations) ...
+            elevator.on("idle", function () {
+                onIdle();
+
+            });
+            
+            elevator.on("floor_button_pressed", function (floorNum) {
+				elevator.goToFloor(floorNum);
+                // if(elevator.loadFactor() > 0.5) {
+                // 	elevator.goToFloor(floorNum);
+				// } else {
+				// 	floorSet.add(floorNum);
+				// }
+            })
+
+
+            elevator.on("stopped_at_floor", function (floorNum) {
+                waitingAtFloors.forEach(floorSet => {
+                    floorSet.delete(floorNum);
+                });
+            });
+            
+            elevator.on("passing_floor", function (floorNum) {
+                // if we're supposed to stop at this floor at some point, do so now
+                const pressedFloors = elevator.getPressedFloors();
+                if(pressedFloors.indexOf(floorNum) >= 0 && elevator.loadFactor() < 1) {
+                    elevator.goToFloor(floorNum, true);
+                }
+                
+				// if there's someone waiting on this floor in the direction we're going, also stop
+				// const floor = floors[floorNum];
+
+            });
+        });
+
+
+        floors.forEach(floor => {
+            const floorNum = floor.floorNum();
+
+            function closestElevatorIndex() {
+                let closestDistance = 100000;
+                let closestIndex = -1;
+                elevators.forEach((elevator, index) => {
+                    const distance = Math.abs(elevator.currentFloor() - floorNum) + elevator.destinationQueue.length;
+                    if(distance < closestDistance) {
+                        closestDistance = distance;
+                        closestIndex = index;
+                    }
+                });
+
+                return closestIndex;
+            }
+
+            function onElevatorCalled() {
+                const elevatorIndex = closestElevatorIndex(floorNum);
+                const floorSet = waitingAtFloors[elevatorIndex];
+                floorSet.add(floorNum);
+                const elevator = elevators[elevatorIndex];
+                if(elevator.destinationQueue.length === 0) {
+                    elevator.destinationQueue.push(floorNum);
+                    elevator.checkDestinationQueue();
+                }
+            }
+
+            floor.on("up_button_pressed", function () {
+                onElevatorCalled(); 
+            });
+            floor.on("down_button_pressed", function () {
+                onElevatorCalled(); 
+            });
+
         });
     },
-    update: function(dt, elevators, floors) {
-        // We normally don't need to do anything here
-    }
+        update: function(dt, elevators, floors) {
+            elevators.forEach((elevator, i) => {
+                console.log(`${i}: ${elevator.destinationQueue}`);
+            })
+            // We normally don't need to do anything here
+        }
 };
 
 var createParamsUrl = function(current, overrides) {
